@@ -17,6 +17,8 @@
   ·
   <a href="https://pan.quark.cn/s/d3322c17e7b6"><strong>📦 网盘下载</strong></a>
   ·
+  <a href="#-加入用户群"><strong>💬 进群</strong></a>
+  ·
   <a href="docs/user-guide.md">使用指南</a>
   ·
   <a href="https://github.com/aqm857886159/Nomi/issues/new/choose">反馈</a>
@@ -24,7 +26,7 @@
 
 <p align="center">
   <a href="https://github.com/aqm857886159/Nomi/stargazers"><img src="https://img.shields.io/badge/GitHub-%E2%AD%90%20Star-2563eb?logo=github&logoColor=2563eb&labelColor=f1f5f9" alt="Star on GitHub" /></a>
-  <a href="https://github.com/aqm857886159/Nomi/releases/latest"><img src="https://img.shields.io/badge/release-v0.15.0-2563eb?labelColor=f1f5f9" alt="Latest release" /></a>
+  <a href="https://github.com/aqm857886159/Nomi/releases/latest"><img src="https://img.shields.io/badge/release-v0.16.0-2563eb?labelColor=f1f5f9" alt="Latest release" /></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-2563eb?labelColor=f1f5f9" alt="Platform" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2563eb?labelColor=f1f5f9" alt="License" /></a>
 </p>
@@ -41,7 +43,7 @@
 
 > 不知道自己哪种 Mac？左上角苹果图标 → 关于本机 → 看「芯片」。
 >
-> 🇨🇳 **打不开 GitHub / 下载慢？用夸克网盘**（当前 v0.15.0）：<https://pan.quark.cn/s/d3322c17e7b6>　·　🌐 也可上[官网](https://nomiaqm.com)自动识别系统下载。
+> 🇨🇳 **打不开 GitHub / 下载慢？用夸克网盘**（当前 v0.16.0）：<https://pan.quark.cn/s/d3322c17e7b6>　·　🌐 也可上[官网](https://nomiaqm.com)自动识别系统下载。
 
 <details>
 <summary><b>第一次打开提示「未知开发者 / 已损坏」？</b>（还没买签名证书，正常现象，点开看绕过方法）</summary>
@@ -49,6 +51,16 @@
 - **macOS**：把 `Nomi.app` 拖进「应用程序」，终端运行 `xattr -cr /Applications/Nomi.app`，再双击打开。
 - **Windows**：SmartScreen 弹窗点「更多信息」→「仍要运行」。
 </details>
+
+---
+
+## 💬 加入用户群
+
+**正在招种子用户——欢迎进群一起把 Nomi 做好。** 扫码进「nomi 画布群」：反馈直达、更新和新功能第一时间收到，也能看别人怎么用。
+
+<img src="docs/media/nomi-canvas-group-wechat.png" alt="nomi 画布群二维码" width="200" />
+
+> 群二维码 **7 月 5 日前有效**；过期或扫不进，加作者微信 **TZ857886159**（长期有效）拉你进群。
 
 ---
 
@@ -153,13 +165,9 @@ Nomi 的创作能力也抽成了一个**无头能力核**（CLI / MCP），可�
 
 ## 关于作者
 
-**青阳** — AI 产品经理 / 创作者。愿意当种子用户的话，加微信 **TZ857886159**（长期有效）拉你进群。
+**青阳** — AI 产品经理 / 创作者。愿意当种子用户的话，加微信 **TZ857886159**（长期有效）拉你进群（群码在上方 [💬 加入用户群](#-加入用户群)）。
 
 <img src="docs/media/qingyang-wechat.jpg" alt="青阳的个人微信二维码" width="140" />
-
-**📅 本周「nomi 画布群」** — 直接扫码进群（微信群码 **7 月 5 日前有效**；过期请加上方个人微信拉你进）。
-
-<img src="docs/media/nomi-canvas-group-wechat.png" alt="nomi 画布群二维码（本周有效）" width="140" />
 
 ---
 

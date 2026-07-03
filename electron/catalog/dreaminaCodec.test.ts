@@ -15,6 +15,8 @@ import {
   parseAccountStatus,
   hasDreaminaCliAccess,
   isNotMaestroVip,
+  isComplianceConfirmationRequired,
+  describeDreaminaFailure,
 } from "./dreaminaCodec";
 
 describe("extractDreaminaJson", () => {
@@ -228,5 +230,34 @@ describe("登录 / 账户状态解析", () => {
     expect(hasDreaminaCliAccess("standard")).toBe(false);
     expect(hasDreaminaCliAccess("")).toBe(false);
     expect(hasDreaminaCliAccess("maestro vip")).toBe(true);
+  });
+});
+
+describe("describeDreaminaFailure（治「用不了」黑洞）", () => {
+  it("静默失败（exit≠0 + 输出全空）→ 给会员/网页授权两条最可能原因，不甩 exit=1", () => {
+    const msg = describeDreaminaFailure(1, "", "");
+    expect(msg).not.toMatch(/^即梦 CLI 调用失败：exit=1$/);
+    expect(msg).toMatch(/会员/);
+    expect(msg).toMatch(/授权/);
+    expect(msg).toMatch(/exit=1/); // 仍带原始码便于排错
+  });
+
+  it("命中 AigcComplianceConfirmationRequired → 指引网页端授权", () => {
+    const msg = describeDreaminaFailure(1, "", "submit failed: AigcComplianceConfirmationRequired");
+    expect(msg).toMatch(/网页端|jimeng\.jianying\.com/);
+    expect(msg).toMatch(/授权/);
+  });
+
+  it("命中非会员闸 → 指引开通会员", () => {
+    expect(describeDreaminaFailure(1, "", "current account is not maestro vip")).toMatch(/会员/);
+  });
+
+  it("有原始错误文本时透传（截断保护）", () => {
+    expect(describeDreaminaFailure(2, "", "invalid param: duration out of range")).toMatch(/invalid param/);
+  });
+
+  it("isComplianceConfirmationRequired 识别授权闸", () => {
+    expect(isComplianceConfirmationRequired("AigcComplianceConfirmationRequired")).toBe(true);
+    expect(isComplianceConfirmationRequired("一切正常")).toBe(false);
   });
 });

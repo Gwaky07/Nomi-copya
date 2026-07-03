@@ -12,6 +12,17 @@ function invokeSync<T>(channel: string, ...args: unknown[]): T {
 
 contextBridge.exposeInMainWorld("nomiDesktop", {
   platform: process.platform,
+  // 窗口控制（Windows 自绘标题栏用；mac 原生 chrome 不调用）。窄面：仅 min/max/close + 最大化态订阅。
+  window: {
+    minimize: () => ipcRenderer.invoke("nomi:window:minimize"),
+    maximize: () => ipcRenderer.invoke("nomi:window:maximize"),
+    close: () => ipcRenderer.invoke("nomi:window:close"),
+    onMaximized: (cb: (maximized: boolean) => void) => {
+      const listener = (_: unknown, v: boolean) => cb(v);
+      ipcRenderer.on("nomi:window:maximized", listener);
+      return () => ipcRenderer.removeListener("nomi:window:maximized", listener);
+    },
+  },
   logRendererCrash: (message: unknown) => ipcRenderer.send("nomi:log:renderer-crash", message),
   app: {
     reopenLibraryWindow: () => ipcRenderer.send("nomi:app:reopen-library-window"),
@@ -170,7 +181,7 @@ contextBridge.exposeInMainWorld("nomiDesktop", {
       }>,
     guessKinds: (payload: unknown) =>
       ipcRenderer.invoke("nomi:onboarding:guess-kinds", payload) as Promise<{
-        kinds: Record<string, "text" | "image" | "video">;
+        kinds: Record<string, "text" | "image" | "video" | "audio">;
       }>,
     testConnection: (payload: unknown) =>
       ipcRenderer.invoke("nomi:onboarding:test-connection", payload) as Promise<{

@@ -11,10 +11,11 @@
  *
  * 入口消失的三条退出路：① 4/4 全做完；② 用户点「不再提示」；③ 首次显示满 2 天仍未
  * 完成 → 自动永久关闭。后两条写 nomi:checklist-dismissed，关了不再回来（onboardingState）。
- * 打勾单调持久（localStorage）。渲染在 NomiAppBar 内（React 树内，保 --nomi-* token）。
+ * 打勾单调持久（localStorage）。挂载位置按平台分流：win32 渲染在 WorkbenchShell 自绘标题栏内，
+ * 非 win32（mac/Linux）渲染在 NomiAppBar 右簇内——两边都在 React 树内，保 --nomi-* token。
  */
 import React from 'react'
-import { IconCheck, IconChevronDown, IconListCheck } from '@tabler/icons-react'
+import { IconCheck, IconChevronDown, IconListCheck, IconMap } from '@tabler/icons-react'
 import { cn } from '../../utils/cn'
 import { useGenerationCanvasStore } from '../generationCanvas/store/generationCanvasStore'
 import { useHasTextModel } from '../library/useHasTextModel'
@@ -166,7 +167,7 @@ export function OnboardingChecklist(): JSX.Element | null {
         aria-label={`上手 4 步，已完成 ${doneCount} / ${ALL_KEYS.length}`}
         aria-expanded={open}
         className={cn(
-          'inline-flex items-center gap-1.5 h-8 px-2.5 cursor-pointer font-inherit',
+          'inline-flex items-center gap-1.5 h-7 px-2.5 cursor-pointer font-inherit',
           'rounded-nomi-sm border border-transparent bg-transparent',
           'text-body-sm text-nomi-ink-80 transition-[background,color] duration-[var(--nomi-transition-fast)]',
           'hover:bg-nomi-ink-05 hover:text-nomi-ink',
@@ -186,7 +187,7 @@ export function OnboardingChecklist(): JSX.Element | null {
           aria-label="上手 4 步"
           style={{ top: anchor.top, right: anchor.right }}
           className={cn(
-            'fixed z-[60] w-64 overflow-hidden',
+            'fixed z-[180] w-64 overflow-hidden',
             'rounded-nomi border border-nomi-line bg-nomi-paper shadow-nomi-lg',
           )}
         >
@@ -253,7 +254,22 @@ export function OnboardingChecklist(): JSX.Element | null {
             })}
           </ul>
 
-          <div className="flex justify-end border-t border-nomi-line-soft px-3 py-2">
+          <div className="flex items-center justify-between border-t border-nomi-line-soft px-3 py-2">
+            {/* 新手最显眼处的手册入口：清单本就是上手时盯着的面板，开同一个 nomi-open-handbook 事件。 */}
+            <button
+              type="button"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('nomi-open-handbook'))
+                setOpen(false)
+              }}
+              className={cn(
+                'inline-flex items-center gap-1 rounded-nomi-sm border-0 bg-transparent px-1.5 py-0.5 cursor-pointer',
+                'text-caption text-nomi-accent transition-colors hover:text-nomi-ink',
+              )}
+            >
+              <IconMap size={13} stroke={1.7} aria-hidden="true" />
+              看完整手册
+            </button>
             <button
               type="button"
               onClick={handleDismiss}

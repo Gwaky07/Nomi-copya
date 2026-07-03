@@ -156,7 +156,8 @@ describe('buildCatalogTaskRequest — 档案 mapping 桶由 transportTaskKind �
   function videoNode(modelKey: string, modeId: string, extra: Record<string, unknown> = {}): GenerationCanvasNode {
     return {
       id: 'r1', kind: 'video', title: '', position: { x: 0, y: 0 }, prompt: 'x',
-      meta: { modelKey, modelVendor: 'kie', vendor: 'kie', archetype: { id: modelKey.includes('happyhorse') ? 'happyhorse' : modelKey.includes('fast') ? 'seedance-2-fast' : 'seedance-2', modeId }, ...extra },
+      // 变体（fast/mini）不改 archetype id —— 仍是 'seedance-2'（变体是正交轴 meta.variantId，非独立档案）。
+      meta: { modelKey, modelVendor: 'kie', vendor: 'kie', archetype: { id: modelKey.includes('happyhorse') ? 'happyhorse' : 'seedance-2', modeId }, ...extra },
     }
   }
   it('Seedance omni（无首帧）→ image_to_video，不再误判 text_to_video 撞 HappyHorse mapping', () => {
@@ -344,7 +345,7 @@ describe('Seedream 档案（图像，改图输入图走 image_urls，与 GPT 同
     const built = buildCatalogTaskRequest(sdNode('edit', { referenceImageUrls: ['https://x/1.png', 'https://x/2.png'] }))
     expect(built.request.kind).toBe('image_edit')
     const ai = built.request.extras?.archetypeInput as Record<string, unknown>
-    expect(ai.model).toBe('bytedance/seedream-v4-edit')
+    expect(ai.model).toBe('seedream/4.5-edit')
     expect(ai.image_urls).toEqual(['https://x/1.png', 'https://x/2.png'])
     expect(ai).not.toHaveProperty('input_urls')
     expect(ai).not.toHaveProperty('reference_image_urls')

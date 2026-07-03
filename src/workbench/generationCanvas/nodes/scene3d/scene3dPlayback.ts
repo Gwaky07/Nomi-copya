@@ -11,6 +11,7 @@ import { CAMERA_DEFAULT_TARGET, UNGROUPED_TRAJECTORY_GROUP_ID } from './scene3dC
 import { buildTrajectoryCurve, clampRatio, remapTrajectoryTimeRatio, wrapRatio } from './trajectory/trajectoryUtils'
 import { cameraLookAtRotation, eulerToArray, vectorToArray } from './scene3dMath'
 import { objectVisualHalfHeight } from './scene3dCrowd'
+import { samplePoseKeyframe } from './scene3dPoseTrack'
 
 export function trajectoryIdsForPlaybackGroup(state: Scene3DState, groupId: string | null): Set<string> | null {
   if (!groupId) return null
@@ -95,6 +96,14 @@ export function sceneObjectCameraTargetPosition(
   return [...object.position]
 }
 
+// 相机运镜 take 的「瞄准轨迹」绑定 id 约定：相机 id + 此后缀。aim 轨迹用与相机轨迹同一套
+// sceneObjectTrajectorySample 采样（按这个合成 id 在 trajectoryBindings 里找），不引第二套采样机制。
+export const CAMERA_AIM_BINDING_SUFFIX = ':aim'
+
+export function cameraAimBindingId(cameraId: string): string {
+  return `${cameraId}${CAMERA_AIM_BINDING_SUFFIX}`
+}
+
 export function cameraWithPlaybackPosition(
   state: Pick<Scene3DState, 'objects' | 'trajectories' | 'trajectoryBindings'>,
   camera: Scene3DCamera,
@@ -103,9 +112,16 @@ export function cameraWithPlaybackPosition(
 ): Scene3DCamera {
   const sample = sceneObjectTrajectorySample(state, camera.id, playheadSeconds, activeTrajectoryIds)
   const position = sample ? vectorToArray(sample.position) : camera.position
-  const target = sceneObjectCameraTargetPosition(state, camera.followTargetId, playheadSeconds, activeTrajectoryIds)
-    ?? camera.target
-    ?? CAMERA_DEFAULT_TARGET
+  // 注视点优先级：① aim 轨迹（相机运镜 take 录下的逐帧朝向，free-look 转头忠实还原）
+  //  → ② follow 某物体（角色走位 take，相机跟拍主体）→ ③ 静态 target（老行为）。三者互斥单源。
+  const aimSample = camera.aimTrajectoryId
+    ? sceneObjectTrajectorySample(state, cameraAimBindingId(camera.id), playheadSeconds, activeTrajectoryIds)
+    : null
+  const target = aimSample
+    ? vectorToArray(aimSample.position)
+    : sceneObjectCameraTargetPosition(state, camera.followTargetId, playheadSeconds, activeTrajectoryIds)
+      ?? camera.target
+      ?? CAMERA_DEFAULT_TARGET
   return {
     ...camera,
     position,
@@ -151,18 +167,28 @@ export function playbackCameraAtPlayhead(
   return activeCamera
 }
 
+// 时刻 t 该对象生效的 pose-over-time 姿势。无 poseTrack / t 早于首帧 → 落回静态 object.pose（老行为）。
+// 与轨迹采样独立：站着原地切动作（无轨迹绑定）也要随时间变 pose。
+function objectPoseAtPlayhead(object: Scene3DObject, playheadSeconds: number): Scene3DObject {
+  if (!object.poseTrack || object.poseTrack.length === 0) return object
+  const keyframe = samplePoseKeyframe(object.poseTrack, playheadSeconds)
+  if (!keyframe) return object
+  return { ...object, pose: keyframe.pose }
+}
+
 export function objectWithPlaybackPose(
   state: Pick<Scene3DState, 'trajectories' | 'trajectoryBindings'>,
   object: Scene3DObject,
   playheadSeconds: number,
   activeTrajectoryIds: ReadonlySet<string> | null = null,
 ): Scene3DObject {
+  const posed = objectPoseAtPlayhead(object, playheadSeconds)
   const sample = sceneObjectTrajectorySample(state, object.id, playheadSeconds, activeTrajectoryIds)
-  if (!sample) return object
+  if (!sample) return posed
   const position = sample.position.clone().add(new THREE.Vector3(0, objectVisualHalfHeight(object), 0))
   const nextObject = {
-    ...object,
-    visible: object.visible && sample.visible,
+    ...posed,
+    visible: posed.visible && sample.visible,
     position: vectorToArray(position),
   }
   if (!sample.tangent) return nextObject

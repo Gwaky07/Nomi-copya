@@ -71,10 +71,66 @@ export function toLowerCase(values: Array<string | undefined>): string | undefin
   return v ? v.toLowerCase() : undefined;
 }
 
-/** 命名转换注册表。新增一种转换在此登记，op 用其 id 引用。 */
-export const PARAM_TRANSFORMS: Record<string, (values: Array<string | undefined>) => string | undefined> = {
+// ── AGNES 视频派生（D1：用户选 比例+清晰度+时长，wire 要 width/height/num_frames/frame_rate）──
+// AGNES 清晰度档位 480p/720p/1080p = **短边**像素（与标准 1080p=1920×1080 一致：1080 是 16:9 的短边）。
+// 长边 = 短边 × 长短比，对齐 8 倍数（AGNES 视频维度按 8 对齐；num_frames 另走 8n+1）。
+const AGNES_TIER_SHORT_EDGE: Record<string, number> = { "480p": 480, "720p": 720, "1080p": 1080 };
+
+function roundTo8(n: number): number {
+  return Math.max(8, Math.round(n / 8) * 8);
+}
+
+/** 解析 "a:b" 比例 → [a,b]；非法 → null。 */
+function parseAspect(raw: string | undefined): [number, number] | null {
+  const m = (raw || "").trim().toLowerCase().match(/^(\d+)\s*[:x]\s*(\d+)$/);
+  if (!m) return null;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  return a && b ? [a, b] : null;
+}
+
+/** (比例, 清晰度档位) → [width, height] 像素（短边=档位，长边按比例，8 倍数对齐）。 */
+function agnesVideoDims(aspect: string | undefined, res: string | undefined): [number, number] | null {
+  const ab = parseAspect(aspect);
+  if (!ab) return null;
+  const [a, b] = ab;
+  const shortEdge = AGNES_TIER_SHORT_EDGE[(res || "").trim().toLowerCase()] ?? AGNES_TIER_SHORT_EDGE["720p"];
+  const longEdge = roundTo8(shortEdge * (Math.max(a, b) / Math.min(a, b)));
+  const short = roundTo8(shortEdge);
+  // a>=b → 横向/方形：width 是长边；a<b → 纵向：height 是长边。
+  return a >= b ? [longEdge, short] : [short, longEdge];
+}
+
+// ⚠️ 返回**数字**(非字符串)：AGNES 是 Go 后端,width/height/num_frames 是严格 int——发字符串
+// "1280" 会 400(cannot unmarshal string into int,2026-06-30 live 实测)。整 token 模板
+// `"{{request.params.num_frames}}"` 保留原值类型 → 存数字即发整数。
+export function agnesVideoWidth(values: Array<string | undefined>): number | undefined {
+  const dims = agnesVideoDims(values[0], values[1]);
+  return dims ? dims[0] : undefined;
+}
+
+export function agnesVideoHeight(values: Array<string | undefined>): number | undefined {
+  const dims = agnesVideoDims(values[0], values[1]);
+  return dims ? dims[1] : undefined;
+}
+
+/** 时长(秒) → num_frames（@24fps，贴最近 8n+1，clamp 9~441）。返回数字(AGNES int,见上)。 */
+export function agnesVideoNumFrames(values: Array<string | undefined>): number | undefined {
+  const seconds = Number((values[0] || "").trim());
+  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+  const target = seconds * 24;
+  const n = Math.max(1, Math.round((target - 1) / 8));
+  return Math.min(441, 8 * n + 1);
+}
+
+/** 命名转换注册表。新增一种转换在此登记，op 用其 id 引用。值转换可返回 string 或 number
+ *  （number 用于严格类型的 wire 字段,如 AGNES Go 后端的 int width/height/num_frames）。 */
+export const PARAM_TRANSFORMS: Record<string, (values: Array<string | undefined>) => string | number | undefined> = {
   ratioResToOpenAiSize,
   toLowerCase,
+  agnesVideoWidth,
+  agnesVideoHeight,
+  agnesVideoNumFrames,
 };
 
 // ── 应用翻译：渲染 body 前把 canonical 参数翻译成 wire 字段注入 params ───────────────

@@ -29,6 +29,8 @@ import {
   CameraViewEditController,
 } from './scene3dViewControllers'
 import { CameraStateRecorder } from './CameraStateRecorder'
+import { CharacterDriveController } from './scene3dCharacterDriveController'
+import { Scene3DPossessPrompt, Scene3DCameraPossessPrompt } from './scene3dPossessPrompt'
 import { TrajectoryRenderer } from './trajectory'
 
 export function SceneContent({
@@ -41,6 +43,12 @@ export function SceneContent({
   viewLocked,
   cameraViewEditCamera,
   trajectoryMode,
+  possessedObject,
+  possessedLocomotionClip,
+  cameraPossessId,
+  onLocomotionChange,
+  onPossess,
+  onCameraPossess,
   onSelect,
   onFocus,
   onObjectPatch,
@@ -77,6 +85,16 @@ export function SceneContent({
   viewLocked: boolean
   cameraViewEditCamera?: Scene3DCamera
   trajectoryMode: boolean
+  possessedObject?: Scene3DObject
+  // 被操控假人当前的 locomotion clip（idle/walk/run），由控制器算速度上抛、驱动该假人迈腿动画。
+  possessedLocomotionClip?: string
+  // 当前被操控相机 id（用于「正在操控这台相机时不再显其操控浮层」）。
+  cameraPossessId?: string | null
+  onLocomotionChange?: (clip: string) => void
+  // 画布内「操控」浮层入口的点击回调（#6）。缺省 = 不显浮层（如只读）。
+  onPossess?: (objectId: string) => void
+  // 画布内「操控镜头」浮层入口的点击回调。缺省 = 不显（如只读）。
+  onCameraPossess?: (cameraId: string) => void
   onSelect: (selection: Scene3DSelection) => void
   onFocus: (id: string) => void
   onObjectPatch: (id: string, patch: Partial<Scene3DObject>) => void
@@ -138,6 +156,21 @@ export function SceneContent({
   const gridCellColor = state.environment.darkMode ? DARK_GRID_CELL_COLOR : GRID_CELL_COLOR
   const gridSectionColor = state.environment.darkMode ? DARK_GRID_SECTION_COLOR : GRID_SECTION_COLOR
 
+  // 画布内「操控」浮层只在「选中单个假人、未在操控该假人、非只读、非轨迹/取景态」时贴它头顶出现（#6）。
+  const possessPromptObject =
+    onPossess && !readOnly && !trajectoryMode && !cameraViewEditing && selection?.type === 'object'
+      ? state.objects.find(
+          (object) =>
+            object.id === selection.id && object.type === 'mannequin' && object.id !== possessedObject?.id,
+        )
+      : undefined
+
+  // 画布内「操控镜头」浮层：选中单个相机、未在操控、非只读、非轨迹/取景态时贴相机旁出现（与角色一视同仁 P4）。
+  const cameraPossessPromptCamera =
+    onCameraPossess && !readOnly && !trajectoryMode && !cameraViewEditing && selection?.type === 'camera'
+      ? state.cameras.find((camera) => camera.id === selection.id && camera.id !== cameraPossessId)
+      : undefined
+
   return (
     <>
       <Scene3DEnvironmentLayer environment={state.environment} />
@@ -180,13 +213,15 @@ export function SceneContent({
           key={object.id}
           object={object}
           selected={selection?.type === 'object' && selection.id === object.id}
-          readOnly={readOnly || trajectoryMode}
+          readOnly={readOnly || trajectoryMode || possessedObject?.id === object.id}
           interactionDisabled={trajectoryMode}
           transformMode={transformMode}
           orbitControlsActive={!freeLook}
           navigationLockedRef={navigationLockedRef}
           roleLabel={object.type === 'mannequin' ? mannequinRoleData.labels.get(object.id) : undefined}
           roleStartIndex={mannequinRoleData.starts.get(object.id)}
+          activeClip={possessedObject?.id === object.id ? possessedLocomotionClip : undefined}
+          possessed={possessedObject?.id === object.id}
           onSelect={() => onSelect({ type: 'object', id: object.id })}
           onFocus={() => onFocus(object.id)}
           onTransformStart={onTransformInteractionStart}
@@ -194,6 +229,12 @@ export function SceneContent({
           onTransform={(patch) => onObjectPatch(object.id, patch)}
         />
       ))}
+      {possessPromptObject && onPossess ? (
+        <Scene3DPossessPrompt object={possessPromptObject} onPossess={onPossess} />
+      ) : null}
+      {cameraPossessPromptCamera && onCameraPossess ? (
+        <Scene3DCameraPossessPrompt camera={cameraPossessPromptCamera} onPossess={onCameraPossess} />
+      ) : null}
       {!cameraViewEditing ? state.cameras.map((camera) => (
         <CameraHelperView
           key={camera.id}
@@ -228,6 +269,8 @@ export function SceneContent({
         selectionActive={selection !== null}
         speed={flySpeed}
         target={state.editorCamera.target}
+        keyboardDisabled={Boolean(possessedObject)}
+        followObjectId={possessedObject?.id ?? null}
         navigationLockedRef={navigationLockedRef}
         onClearSelection={() => onSelect(null)}
         onWheelNavigation={onWheelNavigation}
@@ -240,6 +283,15 @@ export function SceneContent({
         onDraftChange={onEditorCameraDraft}
         onCommit={onEditorCameraCommit}
       />
+      {possessedObject ? (
+        <CharacterDriveController
+          possessedObject={possessedObject}
+          flySpeed={flySpeed}
+          locomotionClip={possessedLocomotionClip}
+          onObjectPatch={onObjectPatch}
+          onLocomotionChange={onLocomotionChange}
+        />
+      ) : null}
       <CaptureBinder cameras={state.cameras} setApi={setCaptureApi} />
     </>
   )

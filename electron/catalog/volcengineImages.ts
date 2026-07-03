@@ -14,6 +14,29 @@ function seedreamCreateOp(): HttpOperation {
     // watermark:false 去掉火山默认的「AI生成」角标（真实验证：默认带角标，false 后干净）——创作工具默认要干净图。
     body: { model: "{{model.modelKey}}", prompt: "{{request.prompt}}", size: "{{request.params.size}}", watermark: false },
     response_mapping: { image_url: "data.0.url" },
+    // size 等档案默认由 archetypeWireDefaults 桥接兜底（runtime.ts，单一真相源=档案 seedreamVolcengine.ts）。
+  };
+}
+
+/**
+ * 图生图/改图 create op（火山统一生成-编辑架构）。与文生图同端点同响应，仅多一个 `image` 字段（参考图 URL 数组）
+ * + sequential_image_generation:disabled（出单图）。2026-06-30 真机验证：image:[url] 被服务端识别并下载，字段契约确认。
+ * image 取档案改图模式的输入图数组（slot inputKey=image_urls，本地图经 ANON_UPLOAD 自动传公网）。
+ */
+function seedreamEditOp(): HttpOperation {
+  return {
+    method: "POST",
+    path: "/api/v3/images/generations",
+    headers: CREATE_HEADERS,
+    body: {
+      model: "{{model.modelKey}}",
+      prompt: "{{request.prompt}}",
+      image: "{{request.params.image_urls}}",
+      sequential_image_generation: "disabled",
+      size: "{{request.params.size}}",
+      watermark: false,
+    },
+    response_mapping: { image_url: "data.0.url" },
   };
 }
 
@@ -30,12 +53,20 @@ function seedreamModel(modelKey: string, labelZh: string, slug: string): Volceng
     modelKey,
     labelZh,
     archetypeId: "volcengine-seedream",
-    mappings: [{
-      id: `seed-volcengine-${slug}-text_to_image`,
-      taskKind: "text_to_image",
-      name: `${labelZh} · 文生图`,
-      create: seedreamCreateOp(),
-    }],
+    mappings: [
+      {
+        id: `seed-volcengine-${slug}-text_to_image`,
+        taskKind: "text_to_image",
+        name: `${labelZh} · 文生图`,
+        create: seedreamCreateOp(),
+      },
+      {
+        id: `seed-volcengine-${slug}-image_edit`,
+        taskKind: "image_edit",
+        name: `${labelZh} · 改图`,
+        create: seedreamEditOp(),
+      },
+    ],
   };
 }
 
@@ -43,7 +74,7 @@ function seedreamModel(modelKey: string, labelZh: string, slug: string): Volceng
 // 同步图片 API 形状一致（5.0 已真实 E2E 出图验证；4.x 同端点同契约）。modelKey 取自 Ark /api/v3/models。
 // 3.0 已 Retiring，不放。Seedance 视频是异步族（另一形状），待单独接（见方案文档）。
 export const VOLCENGINE_IMAGE_MODELS: VolcengineImageModel[] = [
-  seedreamModel("doubao-seedream-5-0-260128", "Seedream 5.0", "seedream-5"),
+  seedreamModel("doubao-seedream-5-0-260128", "Seedream 5.0 lite", "seedream-5"),
   seedreamModel("doubao-seedream-4-5-251128", "Seedream 4.5", "seedream-4-5"),
   seedreamModel("doubao-seedream-4-0-250828", "Seedream 4.0", "seedream-4-0"),
 ];

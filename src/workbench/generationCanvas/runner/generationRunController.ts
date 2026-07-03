@@ -453,8 +453,7 @@ function getVideoNodeReadiness(
   }
 
   const { mode, meta } = resolved
-  const taskKind = mode.transportTaskKind ?? resolved.archetype.transportTaskKind
-  if (taskKind === 'text_to_video') return { ok: true, reason: '' }
+  if ((mode.slots || []).length === 0) return { ok: true, reason: '' }
   if (!('id' in node) || !node.id) return { ok: false, reason: '视频节点缺少上游真实图片或视频资产 URL。请先生成或选择首帧/参考图后再生成视频。' }
   const references = resolveGenerationReferences(node, context)
   return hasAnyModeReference(mode, meta, references)

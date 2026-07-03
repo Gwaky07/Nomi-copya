@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import type { HttpOperation } from "./types";
 import { runDreaminaCli, resolveDreaminaBin } from "./dreaminaCli";
-import { normalizeDreaminaOutput, buildMultiframeArgs, splitTransitionLines, parseAccountStatus, hasDreaminaCliAccess } from "./dreaminaCodec";
+import { normalizeDreaminaOutput, buildMultiframeArgs, splitTransitionLines, parseAccountStatus, hasDreaminaCliAccess, describeDreaminaFailure } from "./dreaminaCodec";
 import { renderTemplateValue } from "../ai/requestPipeline";
 import { contentTypeFromPath } from "../assets/assetPaths";
 import { materializeInputFiles } from "./dreaminaInputFiles";
@@ -95,7 +95,9 @@ export async function executeProcessOperation(input: ProcessOperationInput): Pro
     // 退出码非 0 且连 submit_id/gen_status 都解析不到 = 真·调用失败（未装/无 maestro vip 权限/参数非法）。
     // 抛清晰错误让用户看到（如「current account is not maestro vip」），而非吞成空结果。
     if (ran.code !== 0 && !normalized.submitId && !normalized.genStatus) {
-      const message = (ran.stderr || ran.stdout || await explainSilentDreaminaFailure(ran.code)).trim();
+      const directFailure = describeDreaminaFailure(ran.code, ran.stdout, ran.stderr);
+      const accountFailure = ran.stderr || ran.stdout ? "" : await explainSilentDreaminaFailure(ran.code);
+      const message = (accountFailure && !accountFailure.startsWith("exit=") ? accountFailure : directFailure).trim();
       throw new Error(`即梦 CLI 调用失败：${message.slice(0, 600)}`);
     }
 

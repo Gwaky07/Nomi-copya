@@ -216,7 +216,10 @@ export async function applyCanvasToolCall(toolName: string, args: unknown, gestu
       const kind = plannedKinds[index]
       const positionRecord =
         node.position && typeof node.position === 'object' ? (node.position as Record<string, unknown>) : null
-      const meta = buildPlannedNodeMeta(node, entryByKey)
+      const plannedMeta = buildPlannedNodeMeta(node, entryByKey)
+      // 参考卡身份透传（分镜方案的角色/场景/道具锚）→ node.meta.referenceSheet，编号分配处据此跳过。
+      const meta =
+        node.referenceSheet === true ? { ...(plannedMeta ?? {}), referenceSheet: true } : plannedMeta
       // 单节点：尊重 agent 指定位置（增量添加可能要贴近某节点），否则同走避让布局。
       const position =
         total > 1
@@ -467,6 +470,22 @@ export async function applyCanvasToolCall(toolName: string, args: unknown, gestu
       placed: result.sent.map((item) => ({ nodeId: item.nodeId, role: item.role, startFrame: item.startFrame })),
       ...(result.skipped.length ? { skipped: result.skipped } : {}),
     }
+  }
+
+  if (toolName === 'tidy_canvas') {
+    // 助手「整理画布」：复用 store 的 tidyCategory（与右下角整理按钮同一实现，P1 无并行版）。
+    // categoryId 缺省 = 用户当前正看的子画布（activeCategoryId 在 workbenchStore）；aspect 用视口比例兜底。
+    const categoryId =
+      (typeof record.categoryId === 'string' && record.categoryId.trim()) ||
+      useWorkbenchStore.getState().activeCategoryId ||
+      'shots'
+    const aspect =
+      typeof window !== 'undefined' && window.innerHeight > 0 ? window.innerWidth / window.innerHeight : 16 / 9
+    const count = useGenerationCanvasStore
+      .getState()
+      .nodes.filter((node) => (node.categoryId || 'shots') === categoryId).length
+    inCtx(() => useGenerationCanvasStore.getState().tidyCategory(categoryId, aspect))
+    return { tidied: categoryId, nodeCount: count }
   }
 
   throw new Error(`unknown tool ${toolName}`)

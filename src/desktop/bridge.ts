@@ -83,6 +83,13 @@ export type DesktopUpdateEvent =
 
 export type DesktopBridge = {
   platform: string
+  /** 窗口控制（Windows 自绘标题栏用；mac 原生 chrome 时不调用）。老 preload 可能无此口。 */
+  window?: {
+    minimize: () => Promise<void>
+    maximize: () => Promise<void>
+    close: () => Promise<void>
+    onMaximized: (cb: (maximized: boolean) => void) => () => void
+  }
   app?: {
     reopenLibraryWindow: () => void
     hardReloadWindow?: () => void
@@ -270,9 +277,9 @@ export type DesktopBridge = {
       status?: number
       error?: string
     }>
-    /** 按 id 关键词猜模型类型（图片/视频/文本），给「类型」下拉预填，用户可改（Issue #8）。 */
+    /** 按 id 关键词猜模型类型（图片/视频/配音/文本），给「类型」下拉预填，用户可改（Issue #8）。 */
     guessKinds: (payload: { ids: string[] }) => Promise<{
-      kinds: Record<string, 'text' | 'image' | 'video'>
+      kinds: Record<string, 'text' | 'image' | 'video' | 'audio'>
     }>
   }
   /** 版本号 + 检查更新 + 一键更新（功能需求1/2/3）。check/download/install 用户显式触发，进度/状态走 onEvent。 */

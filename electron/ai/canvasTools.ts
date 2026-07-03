@@ -94,7 +94,13 @@ const storyboardAnchorSchema = z.object({
 
 const storyboardShotSchema = z.object({
   index: z.number().int().describe("1-based shot number in script order."),
-  durationSec: z.number().describe("Shot duration in seconds (clamped to the chosen model's max when it lands)."),
+  shotKind: z
+    .enum(["image", "video"])
+    .optional()
+    .describe(
+      "Shot kind: 'image' = still image-storyboard frame (image-to-image, no duration, no camera move / transition / dialogue), 'video' = video shot (has duration + camera motion). Match ALL shots to the storyboard mode requested by the user; default to 'image' unless the user explicitly wants video.",
+    ),
+  durationSec: z.number().describe("Shot duration in seconds (video shots only; for image shots emit 0). Clamped to the chosen model's max when it lands."),
   anchorIds: z.array(z.string()).describe("Which anchors this shot uses (by anchor.id) → visual anchors become reference edges, text anchors fold into the prompt."),
   prompt: z.string().describe("Directly-generatable prompt: camera move + action progression; do NOT restate the anchors' static descriptions."),
   // P0-9:让 AI 一并产出每镜的模型/模式/参数(含负面词)。取值必须来自用户消息里的「可用模型」清单,
@@ -111,7 +117,7 @@ export const storyboardPlanParamsSchema = z.object({
 })
 
 // ── 站位参考 schema（create_staging_reference 的参数；镜像渲染层 stagingBuilder 的 StagingSpec，
-// 进程隔离故两处各一份，与 storyboardPlan 同例。pose 枚举=已校准的 12 预设 id）。──
+// 进程隔离故两处各一份，与 storyboardPlan 同例。pose 枚举=已校准的预设 id）。──
 export const stagingReferenceParamsSchema = z.object({
   shotClientId: z
     .string()
@@ -125,11 +131,11 @@ export const stagingReferenceParamsSchema = z.object({
         name: z.string().optional().describe("Character label, e.g. '林夏' / '角色A'."),
         pose: z
           .enum([
-            "standing", "t-pose", "walk", "run", "sit", "squat",
+            "standing", "t-pose", "walk", "run", "sit", "squat", "crouch",
             "single-knee", "double-knee", "hands-on-hips", "point", "wave", "cheer",
           ])
           .optional()
-          .describe("Body pose preset (default standing). single-knee=proposal kneel, hands-on-hips, point, wave, cheer=arms up."),
+          .describe("Body pose preset (default standing). squat=deep squat, crouch=upright half-crouch, single-knee=proposal kneel, hands-on-hips, point, wave, cheer=arms up."),
         facing: z
           .enum(["toward", "away", "camera", "left", "right"])
           .optional()
@@ -201,7 +207,7 @@ export const cameraMoveParamsSchema = z.object({
     .describe("Framing of the move (wide / medium / close). Default medium."),
   subjectPose: z
     .enum([
-      "standing", "t-pose", "walk", "run", "sit", "squat",
+      "standing", "t-pose", "walk", "run", "sit", "squat", "crouch",
       "single-knee", "double-knee", "hands-on-hips", "point", "wave", "cheer",
     ])
     .optional()
@@ -217,6 +223,7 @@ export const canvasToolNames = [
   "delete_canvas_nodes",
   "run_generation_batch",
   "arrange_storyboard_to_timeline",
+  "tidy_canvas",
   "create_staging_reference",
   "create_camera_move",
 ] as const;
@@ -296,6 +303,18 @@ export const canvasTools = {
         .describe(
           "Optional subset of shot node ids to arrange. Omit to arrange the entire storyboard in script order.",
         ),
+    }),
+  }),
+  // 一键整理画布:把当前子画布(默认用户正看的分类)的节点按分镜序/依赖收成整齐网格,消除多批生成+
+  // 手拖累积的「毛线球」。零扣费、非破坏、⌘Z 可撤销。用户说「整理一下/分一下/太乱了」时调它。
+  tidy_canvas: tool({
+    description:
+      "Tidy the canvas: neatly re-layout the nodes of one canvas category into an organized grid (materials on top, shots below in script/shot-number order, derived slices next to their source). Non-destructive, costs nothing, and the user can undo with ⌘Z. Use this when the user says the canvas is messy / piled up / asks you to 'arrange' or 'sort out' the nodes. Omit categoryId to tidy the category the user is currently viewing (the usual case).",
+    parameters: z.object({
+      categoryId: z
+        .string()
+        .optional()
+        .describe("Optional canvas category id to tidy. Omit to tidy the category the user is currently viewing."),
     }),
   }),
   // 站位参考：组装 3D 假人场景(站位+动作+机位)离屏出图 → 自动连 composition_ref 到镜头，

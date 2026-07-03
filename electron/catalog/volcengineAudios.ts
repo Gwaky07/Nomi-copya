@@ -18,6 +18,7 @@ const TTS_CREATE: HttpOperation = {
   path: "/api/v3/tts/unidirectional",
   headers: { "X-Api-Resource-Id": "seed-tts-2.0" },
   audioResponse: "ndjson-base64",
+  // voice 等档案默认由 archetypeWireDefaults 桥接兜底（runtime.ts，单一真相源=档案 doubaoTtsArchetype.ts）。
 };
 
 export type VolcengineAudioModel = {

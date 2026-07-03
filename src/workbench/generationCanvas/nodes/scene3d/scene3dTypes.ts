@@ -27,7 +27,23 @@ export type Scene3DObject = {
   crowdColumns?: number
   crowdSpacing?: number
   pose?: Record<string, Scene3DVector3>
+  // 动作随时间变化的轨道（录 take 用）。空/缺省 = 老行为（静态 pose）。
+  // time 为绝对场景时间轴秒，与 trajectoryBinding.startTime/播放头同一时钟。
+  poseTrack?: Scene3DPoseKeyframe[]
+  // 被操控角色「确定性迈腿」locomotion clip 名（与 mannequin-animations.glb 内 clip 名逐字一致，如 'walk'）。
+  // 录 take 离屏回放时据此让假人确定性地播该 clip（按帧时刻 setTime 取相位），导出 mp4 里腿就动。
+  // 缺省 = 老行为（不播 locomotion，只走静态 pose/poseTrack 路径 → 零回归）。
+  // 与 poseTrack 共存：某帧 poseTrack 命中非 base 关键帧（用户切了静态动作）→ 静态优先，不播 locomotion。
+  locomotionClip?: string
   children?: string[]
+}
+
+// pose-over-time 单帧：在时刻 time 把该假人切到 pose（presetId 仅留痕/UI 高亮）。
+// pose 缺省 = 站立/rest。自包含（采样不依赖预设常量查表）。
+export type Scene3DPoseKeyframe = {
+  time: number
+  presetId?: string
+  pose?: Record<string, Scene3DVector3>
 }
 
 export type Scene3DCamera = {
@@ -38,6 +54,9 @@ export type Scene3DCamera = {
   rotation: Scene3DVector3
   target: Scene3DVector3
   followTargetId?: string
+  // 相机运镜 take：相机注视点随时间走的「瞄准轨迹」id（录运镜时存下用户每帧看向哪），
+  // 让回放/离屏忠实还原 free-look 转朝向（不靠 follow 某物体、不靠运动切线）。缺省=老行为（看 target/follow）。
+  aimTrajectoryId?: string
   fov: number
   aspectRatio: Scene3DAspectRatio
   lensDepth: number

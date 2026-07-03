@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { canRunGenerationNode, getGenerationNodeReadiness } from './generationRunController'
+import { MODEL_ARCHETYPES } from '../../../config/modelArchetypes'
 import type { GenerationCanvasNode } from '../model/generationCanvasTypes'
 
 // 回归：Seedance omni 视频节点放了参考数组就该「可生成」。修复前 canRunGenerationNode 只看
@@ -98,4 +99,34 @@ describe('canRunGenerationNode — 视频节点参考判定', () => {
     }
     expect(canRunGenerationNode(node)).toBe(true)
   })
+})
+
+describe('video readiness invariant by archetype slots', () => {
+  const videoArchetypes = MODEL_ARCHETYPES.filter((a) => a.kind === 'video')
+
+  it('covers registered video archetypes', () => {
+    expect(videoArchetypes.length).toBeGreaterThan(5)
+  })
+
+  for (const archetype of videoArchetypes) {
+    for (const mode of archetype.modes || []) {
+      const slotless = (mode.slots || []).length === 0
+
+      it(`${archetype.id}/${mode.id}: empty refs can run=${slotless}`, () => {
+        const node = {
+          id: 'inv1',
+          kind: 'video',
+          title: 'v',
+          position: { x: 0, y: 0 },
+          prompt: slotless ? 'cat jumps from sofa' : '',
+          meta: {
+            modelKey: archetype.identifierPatterns?.[0] || archetype.id,
+            archetype: { id: archetype.id, modeId: mode.id },
+          },
+        } as GenerationCanvasNode
+
+        expect(canRunGenerationNode(node, { nodes: [node], edges: [] })).toBe(slotless)
+      })
+    }
+  }
 })
