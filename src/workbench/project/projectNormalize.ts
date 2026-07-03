@@ -39,7 +39,13 @@ export function extractCanvasThumbnailUrls(
         // 脏数据健壮：数组里混入 null / 非对象节点时跳过，不读 .result 触发崩溃。
         if (!node || typeof node !== "object") continue;
         const result = (node as GenerationCanvasNode).result;
-        const url = result?.url || result?.thumbnailUrl;
+        const thumbnailUrl =
+            typeof result?.thumbnailUrl === "string" ? result.thumbnailUrl : "";
+        const url =
+            thumbnailUrl ||
+            (result?.type === "image" && typeof result?.url === "string"
+                ? result.url
+                : "");
         if (typeof url === "string" && url.length > 4) urls.push(url);
     }
     return urls;

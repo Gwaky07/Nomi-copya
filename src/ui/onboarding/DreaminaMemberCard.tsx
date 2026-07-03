@@ -26,6 +26,8 @@ type DreaminaMemberCardProps = {
 
 export function DreaminaMemberCard({ status, onChanged }: DreaminaMemberCardProps): JSX.Element | null {
   const dreamina = getDesktopBridge()?.dreamina
+  const platform = getDesktopBridge()?.platform ?? ''
+  const isWindows = platform === 'win32'
   const [busy, setBusy] = React.useState(false)
   const [flow, setFlow] = React.useState<DeviceFlow | null>(null)
   const [polling, setPolling] = React.useState(false)
@@ -111,7 +113,9 @@ export function DreaminaMemberCard({ status, onChanged }: DreaminaMemberCardProp
           >
             <IconDownload size={15} stroke={1.8} />{busy ? '安装中…' : '一键安装即梦 CLI'}
           </button>
-          <div className="text-micro text-nomi-ink-30">官方源 jimeng.jianying.com，安装到 ~/.local/bin。</div>
+          <div className="text-micro text-nomi-ink-30">
+            官方源 jimeng.jianying.com{isWindows ? '，Windows 会自动装进 WSL 的 ~/.local/bin。' : '，安装到 ~/.local/bin。'}
+          </div>
         </>
       ) : flow ? (
         /* 设备码登录中：显链接 + 验证码 */

@@ -10,11 +10,12 @@ import os from "node:os";
 import path from "node:path";
 import type { HttpOperation } from "./types";
 import { runDreaminaCli, resolveDreaminaBin } from "./dreaminaCli";
-import { normalizeDreaminaOutput, buildMultiframeArgs, splitTransitionLines } from "./dreaminaCodec";
+import { normalizeDreaminaOutput, buildMultiframeArgs, splitTransitionLines, parseAccountStatus, hasDreaminaCliAccess } from "./dreaminaCodec";
 import { renderTemplateValue } from "../ai/requestPipeline";
 import { contentTypeFromPath } from "../assets/assetPaths";
 import { materializeInputFiles } from "./dreaminaInputFiles";
 import type { JsonRecord } from "../jsonUtils";
+import { resolveDreaminaRuntimeMode, translateDreaminaOutputPathForWindows } from "./dreaminaRuntime";
 
 /** runtime 注入的写资产原语（写本地字节进项目素材，返回含 data.url 的记录）。 */
 export type WriteAsset = (projectId: string, bytes: Buffer, fileName: string, contentType: string, meta: JsonRecord) => unknown;
@@ -44,7 +45,10 @@ export type ProcessResponse = {
 export async function executeProcessOperation(input: ProcessOperationInput): Promise<{ response: unknown; request: unknown }> {
   const bin = resolveDreaminaBin();
   if (!bin) {
-    throw new Error("未找到即梦 CLI（dreamina）。请在「模型设置 · 即梦会员」卡里一键安装，或终端运行 curl -fsSL https://jimeng.jianying.com/cli | bash。");
+    const runtime = resolveDreaminaRuntimeMode(undefined);
+    if (runtime.kind === "missing") {
+      throw new Error(runtime.message);
+    }
   }
 
   // 输入文件吞入：把槽给的资产 URL 物化成本地路径写回 params[expose]（spawn 后清理 temp）。
@@ -85,20 +89,21 @@ export async function executeProcessOperation(input: ProcessOperationInput): Pro
   }
 
   try {
-    const ran = await runDreaminaCli(args, { timeoutMs: input.timeoutMs ?? 300_000, bin });
+    const ran = await runDreaminaCli(args, { timeoutMs: input.timeoutMs ?? 300_000, bin: bin || undefined });
     const normalized = normalizeDreaminaOutput(ran.stdout, ran.stderr);
 
     // 退出码非 0 且连 submit_id/gen_status 都解析不到 = 真·调用失败（未装/无 maestro vip 权限/参数非法）。
     // 抛清晰错误让用户看到（如「current account is not maestro vip」），而非吞成空结果。
     if (ran.code !== 0 && !normalized.submitId && !normalized.genStatus) {
-      const message = (ran.stderr || ran.stdout || `exit=${ran.code}`).trim();
+      const message = (ran.stderr || ran.stdout || await explainSilentDreaminaFailure(ran.code)).trim();
       throw new Error(`即梦 CLI 调用失败：${message.slice(0, 600)}`);
     }
 
     // 本地下载文件导入项目素材 → nomi-local://；远端 URL 直接交给现有 buildProfileTaskResult 下载。
     const localUrls: string[] = [];
+    const outputLocalPaths = normalized.localPaths.map(translateDreaminaOutputPathForWindows);
     if (input.projectId) {
-      for (const p of normalized.localPaths) {
+      for (const p of outputLocalPaths) {
         if (!existsSync(p)) continue;
         try {
           const written = input.writeAsset(input.projectId, readFileSync(p), path.basename(p), contentTypeFromPath(p), { kind: "generated" }) as { data?: { url?: string } };
@@ -129,4 +134,15 @@ export async function executeProcessOperation(input: ProcessOperationInput): Pro
     }
     void tempInputs; // temp 输入随 inputDir 整体清理（列表留作未来按文件粒度清理/排错）
   }
+}
+
+async function explainSilentDreaminaFailure(exitCode: number): Promise<string> {
+  const credit = await runDreaminaCli(["user_credit"], { timeoutMs: 20_000 }).catch(() => null);
+  if (credit) {
+    const account = parseAccountStatus(credit.stdout, credit.stderr);
+    if (account.loggedIn && !hasDreaminaCliAccess(account.vipLevel)) {
+      return `当前即梦账号已登录，但 vip_level=${account.vipLevel || "空"}，不具备 dreamina CLI 生成权限。即梦 CLI 会在提交前静默退出；需要升级到支持 CLI 的高级会员档后再试。`;
+    }
+  }
+  return `exit=${exitCode}`;
 }

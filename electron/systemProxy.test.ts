@@ -5,6 +5,7 @@ import {
   describeNetworkError,
   parseEnvProxy,
   parseResolveProxyString,
+  parseWindowsInternetProxySettings,
   rememberProxyStateForTests,
   resetProxyStateForTests,
   SelectiveProxyDispatcher,
@@ -71,6 +72,35 @@ describe("parseResolveProxyString（Electron session.resolveProxy 返回串）",
 
   it("SOCKS5 → unsupported", () => {
     expect(parseResolveProxyString("SOCKS5 127.0.0.1:7891").kind).toBe("unsupported");
+  });
+});
+
+describe("parseWindowsInternetProxySettings（Windows 注册表代理兜底）", () => {
+  it("ProxyEnable=0 → none", () => {
+    expect(parseWindowsInternetProxySettings({ ProxyEnable: "0x0", ProxyServer: "127.0.0.1:20081" })).toEqual({ kind: "none" });
+  });
+
+  it("裸 host:port → HTTP 代理", () => {
+    expect(parseWindowsInternetProxySettings({ ProxyEnable: "0x1", ProxyServer: "127.0.0.1:20081" })).toEqual({
+      kind: "http",
+      url: "http://127.0.0.1:20081",
+      source: "windows-registry",
+    });
+  });
+
+  it("分协议 ProxyServer 优先取 https/http", () => {
+    expect(parseWindowsInternetProxySettings({
+      ProxyEnable: 1,
+      ProxyServer: "http=127.0.0.1:7890;https=127.0.0.1:7891;socks=127.0.0.1:7892",
+    })).toEqual({
+      kind: "http",
+      url: "http://127.0.0.1:7891",
+      source: "windows-registry",
+    });
+  });
+
+  it("仅 SOCKS → unsupported", () => {
+    expect(parseWindowsInternetProxySettings({ ProxyEnable: 1, ProxyServer: "socks=127.0.0.1:7892" }).kind).toBe("unsupported");
   });
 });
 

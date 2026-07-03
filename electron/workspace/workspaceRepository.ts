@@ -51,8 +51,12 @@ export function deriveThumbnailUrls(record: unknown, max = 4): string[] {
   const urls: string[] = [];
   for (const n of nodes) {
     if (urls.length >= max) break;
-    const result = (n as { result?: { url?: unknown; thumbnailUrl?: unknown } } | null)?.result;
-    const url = (typeof result?.url === "string" && result.url) || (typeof result?.thumbnailUrl === "string" && result.thumbnailUrl) || "";
+    const result = (n as { result?: { type?: unknown; url?: unknown; thumbnailUrl?: unknown } } | null)?.result;
+    const thumbnailUrl = typeof result?.thumbnailUrl === "string" ? result.thumbnailUrl : "";
+    const url =
+      thumbnailUrl ||
+      (result?.type === "image" && typeof result?.url === "string" ? result.url : "") ||
+      "";
     if (typeof url === "string" && url.length > 4) urls.push(url);
   }
   return urls;

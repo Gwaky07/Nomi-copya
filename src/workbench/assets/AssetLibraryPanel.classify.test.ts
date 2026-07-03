@@ -28,6 +28,17 @@ describe('classifyUploadFiles', () => {
     expect(r.unsupported).toHaveLength(0)
   })
 
+  it('falls back to extension when MIME is generic octet-stream', () => {
+    const r = classifyUploadFiles([
+      makeFile('poster.png', 'application/octet-stream'),
+      makeFile('trailer.mp4', 'binary/octet-stream'),
+      makeFile('music.aac', 'application/octet-stream'),
+    ])
+    expect(r.mediaFiles.map((f) => f.name)).toEqual(['poster.png', 'trailer.mp4'])
+    expect(r.audioFiles.map((f) => f.name)).toEqual(['music.aac'])
+    expect(r.unsupported).toHaveLength(0)
+  })
+
   it('routes the newly-supported audio formats to audio', () => {
     const r = classifyUploadFiles([
       makeFile('a.m4a', 'audio/mp4'),

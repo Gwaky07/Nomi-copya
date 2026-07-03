@@ -14,7 +14,8 @@ import { isRecoverableTimeoutError } from './recoverableTimeout'
 export { classifyGenerationError, type GenerationErrorReport } from '../../observability/classifyError'
 import type { DependencyWavePlan } from './dependencyWaves'
 import { resolveGenerationReferences } from './generationReferenceResolver'
-import { currentArchetypeMode, hasArchetypeArrayReferences, resolveArchetypeForModel } from '../nodes/controls/archetypeMeta'
+import { currentArchetypeMode, hasArchetypeArrayReferences, readArchetypeArray, resolveArchetypeForModel } from '../nodes/controls/archetypeMeta'
+import type { ArchetypeMode, ModelArchetype } from '../../../config/modelArchetypes'
 import type { GenerationNodeKind } from '../model/generationCanvasTypes'
 
 /** 节点 kind → 付费预估用的产物口径（视频/配音/画面），喂给 describeGenerationCost 报对名词与时长。 */
@@ -102,11 +103,8 @@ export async function runGenerationNode(
   const initialState = useGenerationCanvasStore.getState()
   const initialNode = initialState.nodes.find((node) => node.id === id)
   if (!initialNode) throw new Error('node not found')
-  if (!canRunGenerationNode(initialNode, { nodes: initialState.nodes, edges: initialState.edges })) {
-    throw new Error(initialNode.kind === 'video'
-      ? '视频节点缺少上游真实图片或视频资产 URL。请先生成或选择首帧/参考图后再生成视频。'
-      : `暂不支持「${initialNode.kind}」类型节点的生成`)
-  }
+  const readiness = getGenerationNodeReadiness(initialNode, { nodes: initialState.nodes, edges: initialState.edges })
+  if (!readiness.ok) throw new Error(readiness.reason)
 
   const run = initialState.appendNodeRun(id, {
     status: 'queued',
@@ -379,14 +377,25 @@ export function canRunGenerationNode(
   node: GenerationCanvasNode | Pick<GenerationCanvasNode, 'kind'> | null | undefined,
   context: GenerationRunContext = {},
 ): boolean {
-  if (!node) return false
+  return getGenerationNodeReadiness(node, context).ok
+}
+
+export function getGenerationNodeReadiness(
+  node: GenerationCanvasNode | Pick<GenerationCanvasNode, 'kind'> | null | undefined,
+  context: GenerationRunContext = {},
+): { ok: boolean; reason: string } {
+  if (!node) return { ok: false, reason: '节点不存在' }
   const executionKind = getGenerationNodeExecutionKind(node.kind)
-  if (executionKind === 'image') return true
+  if (executionKind === 'image' || executionKind === 'audio') {
+    const readiness = getArchetypeSlotReadiness(node, context)
+    if (!readiness.ok) return readiness
+    if (executionKind === 'image') return { ok: true, reason: '' }
+  }
   // C5: 文本节点只要选了文本模型就能生成；prompt 缺失由 buildCatalogTaskRequest 兜底报错。
-  if (executionKind === 'text') return true
+  if (executionKind === 'text') return { ok: true, reason: '' }
   // 声音：配音(台词缺失下游兜底，同 text 可生成)；转写需先有音频参考(audio_ref 槽)。
   if (executionKind === 'audio') {
-    if (!('meta' in node)) return true
+    if (!('meta' in node)) return { ok: true, reason: '' }
     const meta = node.meta || {}
     const audioArchetype = resolveArchetypeForModel({
       modelKey: typeof meta.modelKey === 'string' ? meta.modelKey : undefined,
@@ -395,15 +404,88 @@ export function canRunGenerationNode(
     })
     const mode = audioArchetype ? currentArchetypeMode(audioArchetype, meta) : null
     const needsAudioRef = (mode?.slots || []).some((slot) => slot.kind === 'audio_ref')
-    if (!needsAudioRef) return true
-    return Boolean(audioArchetype && hasArchetypeArrayReferences(meta, audioArchetype))
+    if (!needsAudioRef) return { ok: true, reason: '' }
+    return audioArchetype && hasArchetypeArrayReferences(meta, audioArchetype)
+      ? { ok: true, reason: '' }
+      : { ok: false, reason: '这个声音模式需要先放入音频。' }
   }
-  if (executionKind !== 'video') return false
-  if (!('id' in node) || !node.id) return false
-  const references = resolveGenerationReferences(node, context)
-  // omni（全能参考）不靠首/尾帧，靠参考数组——单看 resolveGenerationReferences 看不到 referenceImageUrls，
-  // 会把「已放参考的 omni 节点」误判为不可生成（锁死 ↑ 按钮、提示"需要首帧"）。补一条档案数组判断。
+  if (executionKind !== 'video') return { ok: false, reason: `暂不支持「${node.kind}」类型节点的生成` }
+  const readiness = getVideoNodeReadiness(node, context)
+  if (!readiness.ok) return readiness
+  return { ok: true, reason: '' }
+}
+
+function getArchetypeSlotReadiness(
+  node: GenerationCanvasNode | Pick<GenerationCanvasNode, 'kind'>,
+  context: GenerationRunContext = {},
+): { ok: boolean; reason: string } {
+  if (!('meta' in node)) return { ok: true, reason: '' }
   const meta = node.meta || {}
+  const archetype = resolveArchetypeForModel({
+    modelKey: typeof meta.modelKey === 'string' ? meta.modelKey : undefined,
+    modelAlias: typeof meta.modelAlias === 'string' ? meta.modelAlias : undefined,
+    meta,
+  })
+  if (!archetype) return { ok: true, reason: '' }
+  const mode = currentArchetypeMode(archetype, meta)
+  const references = 'id' in node && node.id ? resolveGenerationReferences(node, context) : null
+  const missing = mode.slots.filter((slot) => slot.min > 0 && !hasRequiredSlotValue(slot.kind, meta, references))
+  if (missing.length === 0) return { ok: true, reason: '' }
+  const labels = missing.map((slot) => slot.label).join('、')
+  return { ok: false, reason: `${archetype.label}「${mode.vendorTerm}」需要先放入${labels}。` }
+}
+
+function getVideoNodeReadiness(
+  node: GenerationCanvasNode | Pick<GenerationCanvasNode, 'kind'>,
+  context: GenerationRunContext = {},
+): { ok: boolean; reason: string } {
+  const slotReadiness = getArchetypeSlotReadiness(node, context)
+  if (!slotReadiness.ok) return slotReadiness
+  if (!('meta' in node)) return { ok: true, reason: '' }
+
+  const resolved = resolveCurrentArchetypeMode(node.meta || {})
+  if (!resolved) {
+    if (!('id' in node) || !node.id) return { ok: false, reason: '视频节点缺少上游真实图片或视频资产 URL。请先生成或选择首帧/参考图后再生成视频。' }
+    const references = resolveGenerationReferences(node, context)
+    return hasAnyVideoReference(node.meta || {}, references)
+      ? { ok: true, reason: '' }
+      : { ok: false, reason: '视频节点缺少上游真实图片或视频资产 URL。请先生成或选择首帧/参考图后再生成视频。' }
+  }
+
+  const { mode, meta } = resolved
+  const taskKind = mode.transportTaskKind ?? resolved.archetype.transportTaskKind
+  if (taskKind === 'text_to_video') return { ok: true, reason: '' }
+  if (!('id' in node) || !node.id) return { ok: false, reason: '视频节点缺少上游真实图片或视频资产 URL。请先生成或选择首帧/参考图后再生成视频。' }
+  const references = resolveGenerationReferences(node, context)
+  return hasAnyModeReference(mode, meta, references)
+    ? { ok: true, reason: '' }
+    : { ok: false, reason: `${resolved.archetype.label}「${mode.vendorTerm}」需要先放入至少一种参考素材。` }
+}
+
+function resolveCurrentArchetypeMode(
+  meta: Record<string, unknown>,
+): { archetype: ModelArchetype; mode: ArchetypeMode; meta: Record<string, unknown> } | null {
+  const archetype = resolveArchetypeForModel({
+    modelKey: typeof meta.modelKey === 'string' ? meta.modelKey : undefined,
+    modelAlias: typeof meta.modelAlias === 'string' ? meta.modelAlias : undefined,
+    meta,
+  })
+  if (!archetype) return null
+  return { archetype, mode: currentArchetypeMode(archetype, meta), meta }
+}
+
+function hasAnyModeReference(
+  mode: ArchetypeMode,
+  meta: Record<string, unknown>,
+  references: ReturnType<typeof resolveGenerationReferences>,
+): boolean {
+  return mode.slots.some((slot) => hasRequiredSlotValue(slot.kind, meta, references))
+}
+
+function hasAnyVideoReference(
+  meta: Record<string, unknown>,
+  references: ReturnType<typeof resolveGenerationReferences>,
+): boolean {
   const archetype = resolveArchetypeForModel({
     modelKey: typeof meta.modelKey === 'string' ? meta.modelKey : undefined,
     modelAlias: typeof meta.modelAlias === 'string' ? meta.modelAlias : undefined,
@@ -415,4 +497,14 @@ export function canRunGenerationNode(
     references.referenceImages.length > 0 ||
     (archetype && hasArchetypeArrayReferences(meta, archetype)),
   )
+}
+
+function hasRequiredSlotValue(kind: string, meta: Record<string, unknown>, references: ReturnType<typeof resolveGenerationReferences> | null): boolean {
+  if (kind === 'first_frame') return Boolean(references?.firstFrameUrl) || (typeof meta.firstFrameUrl === 'string' && meta.firstFrameUrl.trim().length > 0)
+  if (kind === 'last_frame') return Boolean(references?.lastFrameUrl) || (typeof meta.lastFrameUrl === 'string' && meta.lastFrameUrl.trim().length > 0)
+  if (kind === 'source_video') return typeof meta.sourceVideoUrl === 'string' && meta.sourceVideoUrl.trim().length > 0
+  if (kind === 'image_ref') return (references?.referenceImages.length ?? 0) > 0 || readArchetypeArray(meta, 'referenceImageUrls').length > 0
+  if (kind === 'video_ref') return (references?.referenceVideos.length ?? 0) > 0 || readArchetypeArray(meta, 'referenceVideoUrls').length > 0
+  if (kind === 'audio_ref') return (references?.referenceAudios.length ?? 0) > 0 || readArchetypeArray(meta, 'referenceAudioUrls').length > 0
+  return true
 }

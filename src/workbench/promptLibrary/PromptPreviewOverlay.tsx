@@ -94,9 +94,9 @@ export function PromptPreviewOverlay({ prompt, originRect, onClose, onSendToCanv
           <div className={cn('relative w-full bg-nomi-ink-05')} style={{ aspectRatio: '16 / 9' }}>
             {hasMedia ? (
               isVideo ? (
-                <video src={prompt.mediaUrl} controls autoPlay muted loop playsInline className={cn('absolute inset-0 w-full h-full object-cover')} />
+                <video src={prompt.mediaUrl} crossOrigin="anonymous" controls autoPlay muted loop playsInline className={cn('absolute inset-0 w-full h-full object-cover')} />
               ) : (
-                <img src={prompt.mediaUrl} alt={prompt.title} className={cn('absolute inset-0 w-full h-full object-cover')} />
+                <img src={prompt.mediaUrl} alt={prompt.title} crossOrigin="anonymous" className={cn('absolute inset-0 w-full h-full object-cover')} />
               )
             ) : (
               <div className={cn('absolute inset-0 grid place-items-center gap-1 text-nomi-ink-30')}>

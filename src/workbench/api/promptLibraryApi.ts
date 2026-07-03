@@ -23,6 +23,12 @@ export type LibraryPrompt = {
   updatedAt?: string
 }
 
+export function toPromptMediaUrl(mediaUrl: string): string {
+  const url = mediaUrl.trim()
+  if (!/^https?:\/\//i.test(url)) return url
+  return `nomi-local://prompt-media/?url=${encodeURIComponent(url)}`
+}
+
 function requireDesktopRuntime(feature: string): DesktopBridge {
   const desktop = getDesktopBridge()
   if (!desktop?.promptLibrary) throw new Error(`${feature} requires the Electron desktop runtime`)
@@ -41,7 +47,7 @@ function toPrompt(raw: unknown): LibraryPrompt | null {
     id,
     title: String(r.title ?? '未命名'),
     prompt,
-    mediaUrl: String(r.mediaUrl ?? ''),
+    mediaUrl: toPromptMediaUrl(String(r.mediaUrl ?? '')),
     mediaType,
     promptType,
     tags: Array.isArray(r.tags) ? r.tags.map((t) => String(t)) : [],

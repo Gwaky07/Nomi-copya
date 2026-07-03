@@ -1,9 +1,10 @@
 // 即梦 dreamina CLI 的登录/账户/安装 IPC 处理器（主进程侧）。
 // 设备码 OAuth：login-start 拿设备码材料（前端显二维码/验证码）→ 用户扫码 → login-poll 续查到登录态。
-// 解析全走 dreaminaCodec 纯函数（可单测）；spawn 走 dreaminaCli（统一 PATH 兜底 + 超时）。
+// 解析全走 dreaminaCodec 纯函数（可单测）；spawn 走 dreaminaCli（统一 PATH/WSL 兜底 + 超时）。
 import { spawn } from "node:child_process";
 import { resolveDreaminaBin, isDreaminaInstalled, runDreaminaCli } from "./dreaminaCli";
-import { parseDeviceFlow, parseAccountStatus, isNotMaestroVip, type DreaminaDeviceFlow } from "./dreaminaCodec";
+import { parseDeviceFlow, parseAccountStatus, hasDreaminaCliAccess, isNotMaestroVip, type DreaminaDeviceFlow } from "./dreaminaCodec";
+import { resolveDreaminaRuntimeMode } from "./dreaminaRuntime";
 
 export type DreaminaStatus = {
   installed: boolean;
@@ -27,7 +28,7 @@ export async function dreaminaStatus(): Promise<DreaminaStatus> {
     loggedIn: status.loggedIn,
     totalCredit: status.totalCredit,
     vipLevel: status.vipLevel,
-    notMaestroVip: isNotMaestroVip(`${ran.stdout}\n${ran.stderr}`),
+    notMaestroVip: status.loggedIn && !hasDreaminaCliAccess(status.vipLevel) || isNotMaestroVip(`${ran.stdout}\n${ran.stderr}`),
   };
 }
 
@@ -70,21 +71,51 @@ export type DreaminaInstallResult = { ok: boolean; message: string };
  * 官方源 jimeng.jianying.com，用户主动发起；不 bundle（跟官方更新走）。
  */
 export function dreaminaInstall(): Promise<DreaminaInstallResult> {
-  if (isDreaminaInstalled()) return Promise.resolve({ ok: true, message: "即梦 CLI 已安装" });
-  if (process.platform === "win32") {
-    return Promise.resolve({ ok: false, message: "Windows 暂请在 WSL 或手动安装即梦 CLI（curl -fsSL https://jimeng.jianying.com/cli | bash）。" });
-  }
-  return new Promise<DreaminaInstallResult>((resolve) => {
-    const child = spawn("/bin/bash", ["-lc", "curl -fsSL https://jimeng.jianying.com/cli | bash"], { windowsHide: true });
-    let out = "";
-    const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* gone */ } resolve({ ok: false, message: "安装超时，请稍后重试或终端手动安装。" }); }, 120_000);
-    child.stdout?.on("data", (c) => { out += String(c); });
-    child.stderr?.on("data", (c) => { out += String(c); });
-    child.on("error", (e) => { clearTimeout(timer); resolve({ ok: false, message: `安装失败：${e instanceof Error ? e.message : String(e)}` }); });
-    child.on("close", () => {
-      clearTimeout(timer);
-      // 安装脚本可能改 PATH——直接探文件存在性判定成功，比退出码可靠。
-      resolve(resolveDreaminaBin() ? { ok: true, message: "即梦 CLI 安装完成。" } : { ok: false, message: `安装未完成：${out.slice(-300)}` });
+  if (process.platform !== "win32") {
+    if (isDreaminaInstalled()) return Promise.resolve({ ok: true, message: "即梦 CLI 已安装" });
+    return new Promise<DreaminaInstallResult>((resolve) => {
+      const child = spawn("/bin/bash", ["-lc", "curl -fsSL https://jimeng.jianying.com/cli | bash"], { windowsHide: true });
+      let out = "";
+      const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* gone */ } resolve({ ok: false, message: "安装超时，请稍后重试或终端手动安装。" }); }, 120_000);
+      child.stdout?.on("data", (c) => { out += String(c); });
+      child.stderr?.on("data", (c) => { out += String(c); });
+      child.on("error", (e) => { clearTimeout(timer); resolve({ ok: false, message: `安装失败：${e instanceof Error ? e.message : String(e)}` }); });
+      child.on("close", () => {
+        clearTimeout(timer);
+        // 安装脚本可能改 PATH——直接探文件存在性判定成功，比退出码可靠。
+        resolve(isDreaminaInstalled() ? { ok: true, message: "即梦 CLI 安装完成。" } : { ok: false, message: `安装未完成：${out.slice(-300)}` });
+      });
     });
-  });
+  }
+
+  const runtime = resolveDreaminaRuntimeMode(undefined, { requireInstalled: false });
+  if (runtime.kind === "missing") {
+    return Promise.resolve({ ok: false, message: runtime.message });
+  }
+  if (runtime.kind === "wsl") {
+    const installed = resolveDreaminaRuntimeMode(undefined).kind !== "missing";
+    if (installed) return Promise.resolve({ ok: true, message: `即梦 CLI 已安装（WSL: ${runtime.distro}）` });
+    return new Promise<DreaminaInstallResult>((resolve) => {
+      const child = spawn(runtime.wslExe, ["-d", runtime.distro, "--", "bash", "-lc", "curl -fsSL https://jimeng.jianying.com/cli | bash"], {
+        windowsHide: true,
+      });
+      let out = "";
+      const timer = setTimeout(() => {
+        try { child.kill("SIGKILL"); } catch { /* gone */ }
+        resolve({ ok: false, message: "安装超时，请稍后重试或终端手动安装。" });
+      }, 120_000);
+      child.stdout?.on("data", (c) => { out += String(c); });
+      child.stderr?.on("data", (c) => { out += String(c); });
+      child.on("error", (e) => {
+        clearTimeout(timer);
+        resolve({ ok: false, message: `安装失败：${e instanceof Error ? e.message : String(e)}` });
+      });
+      child.on("close", () => {
+        clearTimeout(timer);
+        const ready = resolveDreaminaRuntimeMode(undefined).kind !== "missing";
+        resolve(ready ? { ok: true, message: "即梦 CLI 安装完成。" } : { ok: false, message: `安装未完成：${out.slice(-300)}` });
+      });
+    });
+  }
+  return Promise.resolve({ ok: false, message: "即梦 CLI 安装失败：未能解析可用的运行环境。" });
 }

@@ -36,6 +36,15 @@ type UseNodeDragResizeArgs = {
     commitPersistedChange: () => void;
 };
 
+const NODE_POINTER_DOWN_SKIP_SELECTOR =
+    'button, input, textarea, select, [contenteditable="true"], .ProseMirror, [role="option"], [role="listbox"]';
+
+export function isNodeInteractivePointerDownTarget(target: EventTarget | null): boolean {
+    if (!target || typeof target !== 'object') return false;
+    const maybeElement = target as { closest?: unknown };
+    return typeof maybeElement.closest === 'function' && Boolean(maybeElement.closest(NODE_POINTER_DOWN_SKIP_SELECTOR));
+}
+
 export function useNodeDragResize({
     node,
     selected,
@@ -136,13 +145,10 @@ export function useNodeDragResize({
 
     const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
         const target = event.target as HTMLElement;
-        // C5 安全坑：放行 contenteditable / ProseMirror，否则点正文会被当成拖拽、吞掉光标。
-        if (
-            target.closest(
-                'button, input, textarea, select, [contenteditable="true"], .ProseMirror',
-            )
-        )
+        if (isNodeInteractivePointerDownTarget(target)) {
+            event.stopPropagation();
             return;
+        }
         // 视频不再整块拦截（原 `tagName==='VIDEO' return` 让视频节点拖不动也选不中——用户真机反馈）。
         // 放行 → 节点可拖可选、参数框正常弹；视频 play/pause 点击(无位移)仍工作(拖拽有位移阈值，dragging:false)。
         event.stopPropagation();

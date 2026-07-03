@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, net, protocol, session, shell } fr
 import type { Rectangle, WebContents } from "electron";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { hardenedFetch } from "./hardenedFetch";
 import {
   createProject,
   deleteProject,
@@ -686,6 +687,29 @@ function registerLocalProtocol(): void {
   protocol.handle("nomi-local", async (request) => {
     try {
       const url = new URL(request.url);
+      if (url.hostname === "prompt-media") {
+        const targetUrl = url.searchParams.get("url") || "";
+        if (!targetUrl) return new Response("Missing prompt media URL", { status: 400 });
+        const fetched = await hardenedFetch(targetUrl, {
+          timeoutMs: 30_000,
+          maxBytes: 25 * 1024 * 1024,
+          allowContentTypes: ["image/", "video/"],
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari/537.36",
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,video/*,*/*;q=0.8",
+          },
+        });
+        const headers = new Headers();
+        headers.set("Content-Type", fetched.contentType || "application/octet-stream");
+        headers.set("Access-Control-Allow-Origin", "*");
+        headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+        headers.set("Cache-Control", "public, max-age=3600");
+        const body = fetched.bytes.buffer.slice(
+          fetched.bytes.byteOffset,
+          fetched.bytes.byteOffset + fetched.bytes.byteLength,
+        ) as ArrayBuffer;
+        return new Response(body, { status: fetched.status, headers });
+      }
       if (url.hostname !== "asset") {
         return new Response("Unsupported nomi-local host", { status: 404 });
       }
@@ -716,6 +740,12 @@ function registerLocalProtocol(): void {
 if (hasSingleInstanceLock) app.whenReady().then(async () => {
   registerLocalProtocol();
   installContentSecurityPolicy(session.defaultSession);
+  try {
+    const { applySystemProxy } = await import("./systemProxy");
+    await applySystemProxy(session.defaultSession);
+  } catch (error) {
+    console.error("[nomi:desktop] applySystemProxy failed:", error);
+  }
   // 写入内置模型种子（Seedance 等主流模型档案）；幂等、存在即跳过，不覆盖用户已有记录。
   // sync 且渲染层一进库就读 catalog → 须在 createWindow 前完成。
   try {
@@ -733,13 +763,6 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     });
   }
   await createWindow();
-  setTimeout(() => {
-    void import("./systemProxy")
-      .then(({ applySystemProxy }) => applySystemProxy(session.defaultSession))
-      .catch((error) => {
-        console.error("[nomi:desktop] applySystemProxy failed:", error);
-      });
-  }, lowMemoryMode ? 15000 : 3000);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

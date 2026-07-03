@@ -397,6 +397,10 @@ export type DreaminaAccountStatus = {
   userId: string;
 };
 
+export function hasDreaminaCliAccess(vipLevel: string): boolean {
+  return /maestro|vip/i.test(String(vipLevel || ""));
+}
+
 /**
  * 解析 `dreamina user_credit` 的账户状态。
  * 真实输出：`{ total_credit, user_id, user_name, vip_level }`（已登录）；

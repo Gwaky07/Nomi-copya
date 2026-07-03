@@ -9,6 +9,7 @@ import { dropKindFromMime } from '../model/nodeAssetDrop'
 import { readVideoDurationSeconds } from '../../../media/videoDurationProbe'
 import { getGenerationNodeFootprintSize } from '../model/generationNodeKinds'
 import { useGenerationCanvasStore } from '../store/generationCanvasStore'
+import { mediaKindFromExtension } from '../../../../electron/assets/mediaTypes'
 
 export const GENERATION_CANVAS_IMAGE_IMPORT_MAX_BYTES = 30 * 1024 * 1024
 // 视频文件远大于图片，单独给宽上限；本地优先 App，用户导入自己的片段。
@@ -41,6 +42,7 @@ export type ImportImageFilesOptions = {
   uploadFile?: typeof importWorkbenchLocalAssetFile
   recoverFile?: typeof recoverImportedWorkbenchLocalAssetFile
   exactPosition?: boolean
+  maxFiles?: number
 }
 
 type ImageDimensions = {
@@ -152,7 +154,7 @@ function readFileDataUrl(file: File): Promise<string> {
 /** 画布素材节点只承载 image / video（无音频节点 archetype）。音频上传走项目文件源进库
  *  （importAudioFilesToLibrary），不经此路；这里过滤掉是为画布节点导入语义正确。 */
 function importKindForFile(file: File): 'image' | 'video' | null {
-  const kind = dropKindFromMime(file.type)
+  const kind = dropKindFromMime(file.type) || mediaKindFromExtension(file.name)
   return kind === 'image' || kind === 'video' ? kind : null
 }
 
@@ -287,9 +289,11 @@ export async function importLocalMediaFilesToGenerationCanvas(
   const filtered = filterImportableMediaFiles(inputFiles)
   const created: GenerationAssetImportItem[] = []
   // 单次拖入上限：超出截断（C5：此前 .slice(0,8) 静默丢，无提示）。
-  const MAX_IMPORT_FILES = 8
-  const accepted = filtered.files.slice(0, MAX_IMPORT_FILES)
-  const skippedOverLimitCount = filtered.files.length - accepted.length
+  const maxFiles = typeof options.maxFiles === 'number' ? options.maxFiles : 8
+  const accepted = Number.isFinite(maxFiles)
+    ? filtered.files.slice(0, Math.max(0, Math.floor(maxFiles)))
+    : filtered.files.slice()
+  const skippedOverLimitCount = Number.isFinite(maxFiles) ? filtered.files.length - accepted.length : 0
   if (!accepted.length) {
     return {
       created,

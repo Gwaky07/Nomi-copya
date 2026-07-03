@@ -3,10 +3,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // 把 dreaminaCli（spawn IO）整体 mock 掉，喂合成 stdout，验进程路径端到端不需真二进制。
 const runDreaminaCli = vi.fn();
 const resolveDreaminaBin = vi.fn(() => "/fake/bin/dreamina");
+const resolveDreaminaRuntimeMode = vi.fn(() => ({ kind: "native", bin: "/fake/bin/dreamina" }));
 vi.mock("./dreaminaCli", () => ({
   runDreaminaCli: (...args: unknown[]) => runDreaminaCli(...args),
   resolveDreaminaBin: () => resolveDreaminaBin(),
 }));
+vi.mock("./dreaminaRuntime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./dreaminaRuntime")>();
+  return {
+    ...actual,
+    resolveDreaminaRuntimeMode: (...args: unknown[]) => resolveDreaminaRuntimeMode(...args),
+  };
+});
 
 import { executeProcessOperation } from "./processOperation";
 import { DREAMINA_CURATED_MAPPINGS } from "./dreaminaVideos";
@@ -26,6 +34,7 @@ beforeEach(() => {
   runDreaminaCli.mockReset();
   writeAsset.mockClear();
   resolveDreaminaBin.mockReturnValue("/fake/bin/dreamina");
+  resolveDreaminaRuntimeMode.mockReturnValue({ kind: "native", bin: "/fake/bin/dreamina" });
 });
 
 describe("executeProcessOperation", () => {
@@ -42,6 +51,12 @@ describe("executeProcessOperation", () => {
     runDreaminaCli.mockResolvedValue({ code: 0, stdout: '{"submit_id":"u-1","gen_status":"querying"}', stderr: "" });
     await call(["text2video", "--prompt=cat", "--ratio="]);
     expect(runDreaminaCli).toHaveBeenCalledWith(["text2video", "--prompt=cat"], expect.anything());
+  });
+
+  it("create 命令默认不追加 --download_dir（官方仅 query_result 支持）", async () => {
+    runDreaminaCli.mockResolvedValue({ code: 0, stdout: '{"submit_id":"u-1","gen_status":"querying"}', stderr: "" });
+    await call(["text2image", "--prompt=cat"]);
+    expect(runDreaminaCli).toHaveBeenCalledWith(["text2image", "--prompt=cat"], expect.anything());
   });
 
   it("成功态（远端 URL）→ video_url 带公网链接", async () => {
@@ -70,8 +85,16 @@ describe("executeProcessOperation", () => {
     await expect(call(["text2video", "--prompt=cat"])).rejects.toThrow(/maestro vip/);
   });
 
+  it("CLI 静默 exit=1 时用 user_credit 解释会员档位问题", async () => {
+    runDreaminaCli
+      .mockResolvedValueOnce({ code: 1, stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ code: 0, stdout: '{"total_credit":1327,"user_id":847058235831368,"vip_level":"standard"}', stderr: "" });
+    await expect(call(["text2image", "--prompt=cat"])).rejects.toThrow(/vip_level=standard/);
+  });
+
   it("未装 CLI → 抛安装引导错误", async () => {
     resolveDreaminaBin.mockReturnValue("");
+    resolveDreaminaRuntimeMode.mockReturnValue({ kind: "missing", message: "未找到即梦 CLI，请一键安装" });
     await expect(call(["text2video"])).rejects.toThrow(/未找到即梦 CLI|一键安装/);
   });
 });

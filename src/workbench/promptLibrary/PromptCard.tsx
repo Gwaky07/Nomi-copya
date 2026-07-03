@@ -30,6 +30,7 @@ export const PromptCard = React.memo(function PromptCard({ prompt, onSelect }: P
         isVideo ? (
           <video
             src={prompt.mediaUrl}
+            crossOrigin="anonymous"
             muted
             playsInline
             preload="metadata"
@@ -40,6 +41,7 @@ export const PromptCard = React.memo(function PromptCard({ prompt, onSelect }: P
           <img
             src={prompt.mediaUrl}
             alt={prompt.title}
+            crossOrigin="anonymous"
             loading="lazy"
             className={cn('absolute inset-0 w-full h-full object-cover')}
             onError={() => setBroken(true)}

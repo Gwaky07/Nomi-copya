@@ -13,6 +13,7 @@ import {
   normalizeDreaminaVideoResolution,
   parseDeviceFlow,
   parseAccountStatus,
+  hasDreaminaCliAccess,
   isNotMaestroVip,
 } from "./dreaminaCodec";
 
@@ -221,5 +222,11 @@ describe("登录 / 账户状态解析", () => {
     expect(isNotMaestroVip("current account is not maestro vip")).toBe(true);
     expect(isNotMaestroVip("当前账号没有 dreamina_cli 使用权限")).toBe(true);
     expect(isNotMaestroVip("success")).toBe(false);
+  });
+
+  it("hasDreaminaCliAccess 只把明确 CLI 权限档视为可生成", () => {
+    expect(hasDreaminaCliAccess("standard")).toBe(false);
+    expect(hasDreaminaCliAccess("")).toBe(false);
+    expect(hasDreaminaCliAccess("maestro vip")).toBe(true);
   });
 });

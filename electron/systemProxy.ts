@@ -20,6 +20,7 @@
  * 需 fetch-socks）、系统代理热更新。探到 SOCKS-only 会明确 log 告知，不静默。
  */
 import { URL } from "node:url";
+import { spawnSync } from "node:child_process";
 import type { Session } from "electron";
 import {
   Dispatcher,
@@ -31,8 +32,10 @@ import { isPrivateHost } from "./hardenedFetch";
 
 export type ProxyResolution =
   | { kind: "none" }
-  | { kind: "http"; url: string; source: "env" | "system" }
-  | { kind: "unsupported"; detail: string; source: "env" | "system" };
+  | { kind: "http"; url: string; source: ProxySource }
+  | { kind: "unsupported"; detail: string; source: ProxySource };
+
+type ProxySource = "env" | "system" | "windows-registry";
 
 const LOG = "[nomi:proxy]";
 
@@ -53,15 +56,21 @@ let unsupportedProxyDetail: string | null = null;
  */
 function rememberProxyState(resolution: ProxyResolution): void {
   if (resolution.kind === "http") {
-    activeProxyLabel = `${resolution.url}（来源：${resolution.source === "env" ? "环境变量" : "系统设置"}）`;
+    activeProxyLabel = `${resolution.url}（来源：${proxySourceLabel(resolution.source)}）`;
     unsupportedProxyDetail = null;
   } else if (resolution.kind === "unsupported") {
     activeProxyLabel = null;
-    unsupportedProxyDetail = `${resolution.detail}，来源：${resolution.source === "env" ? "环境变量" : "系统设置"}`;
+    unsupportedProxyDetail = `${resolution.detail}，来源：${proxySourceLabel(resolution.source)}`;
   } else {
     activeProxyLabel = null;
     unsupportedProxyDetail = null;
   }
+}
+
+function proxySourceLabel(source: ProxySource): string {
+  if (source === "env") return "环境变量";
+  if (source === "windows-registry") return "Windows 系统代理";
+  return "系统设置";
 }
 
 /**
@@ -69,7 +78,7 @@ function rememberProxyState(resolution: ProxyResolution): void {
  *  - 接受 `http://h:p` / `https://h:p` / 裸 `h:p`（补 http://）。
  *  - SOCKS 标记为 unsupported（Phase 1 不支持）。
  */
-function classifyProxyString(raw: string, source: "env" | "system"): ProxyResolution {
+function classifyProxyString(raw: string, source: ProxySource): ProxyResolution {
   const value = raw.trim();
   if (!value) return { kind: "none" };
   if (/^socks/i.test(value)) {
@@ -85,6 +94,76 @@ function classifyProxyString(raw: string, source: "env" | "system"): ProxyResolu
   } catch {
     return { kind: "unsupported", detail: `无法解析的代理地址（${value}）`, source };
   }
+}
+
+function parseProxyEnable(value: unknown): boolean {
+  if (typeof value === "number") return value !== 0;
+  const text = String(value ?? "").trim().toLowerCase();
+  if (!text) return false;
+  if (text === "0" || text === "0x0") return false;
+  if (text === "1" || text === "0x1") return true;
+  const numeric = Number(text);
+  return Number.isFinite(numeric) ? numeric !== 0 : false;
+}
+
+function parseWindowsProxyServer(raw: string): ProxyResolution {
+  const value = raw.trim();
+  if (!value) return { kind: "none" };
+  const entries = value
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const keyed = new Map<string, string>();
+  for (const entry of entries) {
+    const eq = entry.indexOf("=");
+    if (eq <= 0) continue;
+    const key = entry.slice(0, eq).trim().toLowerCase();
+    const server = entry.slice(eq + 1).trim();
+    if (key && server) keyed.set(key, server);
+  }
+  if (keyed.size > 0) {
+    const server = keyed.get("https") || keyed.get("http") || keyed.get("proxy");
+    if (server) return classifyProxyString(server, "windows-registry");
+    const socks = keyed.get("socks") || keyed.get("socks5") || keyed.get("socks4");
+    if (socks) return classifyProxyString(/^socks/i.test(socks) ? socks : `socks://${socks}`, "windows-registry");
+    return { kind: "none" };
+  }
+  return classifyProxyString(value, "windows-registry");
+}
+
+export function parseWindowsInternetProxySettings(values: {
+  ProxyEnable?: unknown;
+  ProxyServer?: unknown;
+}): ProxyResolution {
+  if (!parseProxyEnable(values.ProxyEnable)) return { kind: "none" };
+  return parseWindowsProxyServer(String(values.ProxyServer ?? ""));
+}
+
+function queryWindowsInternetSetting(name: string): string {
+  const systemRoot = process.env.SystemRoot || "C:\\Windows";
+  const regExe = `${systemRoot}\\System32\\reg.exe`;
+  const result = spawnSync(regExe, [
+    "query",
+    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+    "/v",
+    name,
+  ], {
+    encoding: "utf8",
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0 || !result.stdout) return "";
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = result.stdout.match(new RegExp(`^\\s*${escaped}\\s+REG_\\w+\\s+(.+?)\\s*$`, "mi"));
+  return match?.[1]?.trim() || "";
+}
+
+function readWindowsInternetProxyFromRegistry(): ProxyResolution {
+  if (process.platform !== "win32") return { kind: "none" };
+  return parseWindowsInternetProxySettings({
+    ProxyEnable: queryWindowsInternetSetting("ProxyEnable"),
+    ProxyServer: queryWindowsInternetSetting("ProxyServer"),
+  });
 }
 
 /** 从环境变量读代理（HTTPS 优先，其次 HTTP，再 ALL）。GUI 从 Finder 启动时这些通常为空。 */
@@ -133,11 +212,12 @@ export async function resolveProxy(session: Session): Promise<ProxyResolution> {
   try {
     // 用一个代表性 https 目标探测（PAC 可能按目标返回不同代理；Phase 1 取通用值）。
     const raw = await session.resolveProxy("https://api.openai.com");
-    return parseResolveProxyString(raw);
+    const fromSession = parseResolveProxyString(raw);
+    if (fromSession.kind !== "none") return fromSession;
   } catch (error) {
     console.error(`${LOG} session.resolveProxy 失败:`, error);
-    return { kind: "none" };
   }
+  return readWindowsInternetProxyFromRegistry();
 }
 
 /**
@@ -223,7 +303,8 @@ export async function applySystemProxy(session: Session): Promise<ProxyResolutio
       // export HTTPS_PROXY 的典型场景）会出现「主进程能下载、渲染层放不出远端视频」的撕裂——
       // 表现为预览区「视频加载失败」。这里把 env 代理也显式喂给 session，让两层同一真相源。
       // 系统来源的代理无需处理：session 默认 mode:'system' 已在用它（且可能是 PAC，别用 fixed 覆盖）。
-      if (resolution.source === "env") {
+      // Windows 注册表兜底意味着 Chromium 没从系统解析到代理，需要显式同步 fixed_servers。
+      if (resolution.source === "env" || resolution.source === "windows-registry") {
         await session.setProxy({
           proxyRules: resolution.url,
           // 本地/私网直连：回环 + 私网网段 + 无点主机名（<local>），别把本地模型服务器

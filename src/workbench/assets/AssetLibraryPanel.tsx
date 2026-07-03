@@ -51,7 +51,9 @@ export function classifyUploadFiles(files: File[]): UploadClassification {
     const kind = mime.startsWith('image/') ? 'image'
       : mime.startsWith('video/') ? 'video'
       : mime.startsWith('audio/') ? 'audio'
-      : mediaKindFromExtension(file.name) // 空/未知 MIME → 扩展名兜底
+      : (mime === '' || mime === 'application/octet-stream' || mime === 'binary/octet-stream')
+        ? mediaKindFromExtension(file.name)
+        : null
     if (kind === 'image' || kind === 'video') mediaFiles.push(file)
     else if (kind === 'audio') audioFiles.push(file)
     else unsupported.push(file)
@@ -215,7 +217,7 @@ export function AssetLibraryPanel({ opened, onClose, projectId }: Props): JSX.El
     if (mediaFiles.length) {
       void import('../generationCanvas/adapters/assetImportAdapter')
         .then(({ importLocalMediaFilesToGenerationCanvas }) =>
-          importLocalMediaFilesToGenerationCanvas(mediaFiles, { basePosition: { x: 120, y: 90 } }))
+          importLocalMediaFilesToGenerationCanvas(mediaFiles, { basePosition: { x: 120, y: 90 }, maxFiles: Infinity }))
         .then((result) => reportMediaImport(result))
         .catch((error) => {
           console.error('asset library upload failed', error)
