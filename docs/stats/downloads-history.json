@@ -414,6 +414,16 @@
         "v0.1.2": 2,
         "v0.1.1": 9
       }
+    },
+    {
+      "date": "2026-07-04",
+      "total": 0,
+      "byPlatform": {
+        "windows": 0,
+        "macArm": 0,
+        "macIntel": 0
+      },
+      "byVersion": {}
     }
   ]
 }
